@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent, ReactNode } from 'react'
 import { base44, requireBase44 } from './lib/base44'
+import witnessMarkSrc from './assets/witness-mark.png'
 import './App.css'
 
 type View = 'capture' | 'status' | 'triage'
@@ -33,6 +34,7 @@ type WitnessEvidence = {
   label?: string
   mime_type?: string
   created_date?: string
+  transcript?: string
 }
 
 type WitnessEvent = {
@@ -94,10 +96,18 @@ function isImage(file: File) {
   return file.type.startsWith('image/')
 }
 
+function formatSeconds(totalSeconds: number) {
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return `${minutes}:${String(seconds).padStart(2, '0')}`
+}
+
+const canRecordAudio = typeof window !== 'undefined' && !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== 'undefined'
+
 function WitnessMark({ compact = false }: { compact?: boolean }) {
   return (
-    <span className={`witness-mark${compact ? ' witness-mark--compact' : ''}`} aria-label="Witness">
-      <span>W</span>
+    <span className={`witness-mark${compact ? ' witness-mark--compact' : ''}`}>
+      <img src={witnessMarkSrc} alt="Witness" />
     </span>
   )
 }
@@ -137,6 +147,20 @@ function App() {
   const [files, setFiles] = useState<File[]>([])
   const [captureBusy, setCaptureBusy] = useState(false)
   const [captureError, setCaptureError] = useState('')
+  const [statementMode, setStatementMode] = useState<'voice' | 'manual'>(canRecordAudio ? 'voice' : 'manual')
+  const [statementPhase, setStatementPhase] = useState<'idle' | 'recording' | 'transcribing' | 'ready'>('idle')
+  const [recordSeconds, setRecordSeconds] = useState(0)
+  const [waveform, setWaveform] = useState<number[]>(() => Array(36).fill(4))
+  const [statementFile, setStatementFile] = useState<File | null>(null)
+  const [statementBlobUrl, setStatementBlobUrl] = useState('')
+  const [editingTranscript, setEditingTranscript] = useState(false)
+  const [isPlayingOriginal, setIsPlayingOriginal] = useState(false)
+  const recorderRef = useRef<MediaRecorder | null>(null)
+  const recordChunksRef = useRef<Blob[]>([])
+  const recordTimerRef = useRef<number | null>(null)
+  const audioCtxRef = useRef<AudioContext | null>(null)
+  const waveformRafRef = useRef<number | null>(null)
+  const originalAudioRef = useRef<HTMLAudioElement | null>(null)
   const [receipt, setReceipt] = useState<{ publicRef: string; status: string } | null>(null)
   const [reference, setReference] = useState(() => localStorage.getItem(REF_STORAGE_KEY) ?? '')
   const [publicStatus, setPublicStatus] = useState<PublicStatus | null>(null)
@@ -225,8 +249,143 @@ function App() {
   }
 
   function onFilesChanged(event: ChangeEvent<HTMLInputElement>) {
-    const next = Array.from(event.target.files ?? []).slice(0, 3)
+    const maxExtra = statementFile ? 2 : 3
+    const next = Array.from(event.target.files ?? []).slice(0, maxExtra)
     setFiles(next)
+  }
+
+  function stopWaveformSampling() {
+    if (waveformRafRef.current) {
+      cancelAnimationFrame(waveformRafRef.current)
+      waveformRafRef.current = null
+    }
+    if (audioCtxRef.current) {
+      void audioCtxRef.current.close()
+      audioCtxRef.current = null
+    }
+  }
+
+  useEffect(() => () => {
+    if (recordTimerRef.current) window.clearInterval(recordTimerRef.current)
+    recorderRef.current?.stream.getTracks().forEach((track) => track.stop())
+    stopWaveformSampling()
+    if (statementBlobUrl) URL.revokeObjectURL(statementBlobUrl)
+  }, [])
+
+  async function startRecording() {
+    setCaptureError('')
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : ''
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
+      recordChunksRef.current = []
+
+      const audioCtx = new AudioContext()
+      const source = audioCtx.createMediaStreamSource(stream)
+      const analyser = audioCtx.createAnalyser()
+      analyser.fftSize = 256
+      source.connect(analyser)
+      audioCtxRef.current = audioCtx
+      const dataArray = new Uint8Array(analyser.frequencyBinCount)
+      const sampleWaveform = () => {
+        analyser.getByteTimeDomainData(dataArray)
+        let peak = 0
+        for (let i = 0; i < dataArray.length; i += 2) {
+          const deviation = Math.abs(dataArray[i] - 128)
+          if (deviation > peak) peak = deviation
+        }
+        const barHeight = Math.min(32, 4 + (peak / 128) * 34)
+        setWaveform((prev) => [...prev.slice(1), barHeight])
+        waveformRafRef.current = requestAnimationFrame(sampleWaveform)
+      }
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) recordChunksRef.current.push(event.data)
+      }
+      recorder.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop())
+        stopWaveformSampling()
+        if (recordTimerRef.current) {
+          window.clearInterval(recordTimerRef.current)
+          recordTimerRef.current = null
+        }
+        void handleRecordingReady()
+      }
+
+      recorder.start()
+      recorderRef.current = recorder
+      setWaveform(Array(36).fill(4))
+      setStatementPhase('recording')
+      setRecordSeconds(0)
+      recordTimerRef.current = window.setInterval(() => setRecordSeconds((seconds) => seconds + 1), 1000)
+      sampleWaveform()
+    } catch {
+      setCaptureError('Microphone access was denied or is unavailable in this browser.')
+    }
+  }
+
+  function stopRecording() {
+    recorderRef.current?.stop()
+  }
+
+  async function handleRecordingReady() {
+    const recorder = recorderRef.current
+    const blob = new Blob(recordChunksRef.current, { type: recorder?.mimeType || 'audio/webm' })
+    const extension = blob.type.includes('mp4') ? 'm4a' : blob.type.includes('ogg') ? 'ogg' : 'webm'
+    const file = new File([blob], `statement-${Date.now()}.${extension}`, { type: blob.type })
+    setStatementFile(file)
+    setStatementBlobUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev)
+      return URL.createObjectURL(blob)
+    })
+    setStatementPhase('transcribing')
+
+    if (!SITE_KEY) {
+      setCaptureError('This build has no reporting-channel key. Add VITE_WITNESS_SITE_KEY before using voice capture.')
+      setStatementPhase('idle')
+      return
+    }
+
+    try {
+      const client = requireBase44() as any
+      const uploaded = await client.integrations.Core.UploadPrivateFile({ file })
+      const result = await client.functions.invoke('transcribe-voice', { site_key: SITE_KEY, file_uri: uploaded.file_uri })
+      const transcript = (result.data.transcript as string) || ''
+      if (transcript) {
+        setMessage(transcript)
+        setStatementPhase('ready')
+      } else {
+        setCaptureError("We couldn't transcribe that clip clearly. You can type your statement instead, or record again.")
+        setStatementPhase('ready')
+      }
+    } catch (error) {
+      setCaptureError(errorMessage(error))
+      setStatementPhase('idle')
+    }
+  }
+
+  function recordAgain() {
+    setMessage('')
+    setStatementFile(null)
+    setStatementBlobUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev)
+      return ''
+    })
+    setEditingTranscript(false)
+    setStatementPhase('idle')
+    setRecordSeconds(0)
+    setWaveform(Array(36).fill(4))
+  }
+
+  function toggleOriginalPlayback() {
+    const audio = originalAudioRef.current
+    if (!audio) return
+    if (isPlayingOriginal) {
+      audio.pause()
+    } else {
+      void audio.play()
+    }
   }
 
   async function submitCapture(event: FormEvent<HTMLFormElement>) {
@@ -243,10 +402,16 @@ function App() {
       return
     }
 
+    if (!message.trim()) {
+      setCaptureError('Record or type a statement before submitting.')
+      return
+    }
+
     try {
       setCaptureBusy(true)
       const client = requireBase44() as any
-      const uploadedEvidence = await Promise.all(files.map(async (file) => {
+      const evidenceFiles = statementFile ? [statementFile, ...files] : files
+      const uploadedEvidence = await Promise.all(evidenceFiles.slice(0, 3).map(async (file) => {
         const upload = await client.integrations.Core.UploadPrivateFile({ file })
         return {
           kind: isImage(file) ? 'screenshot' : file.type.startsWith('audio/') ? 'voice' : file.type.startsWith('video/') ? 'video' : 'document',
@@ -276,6 +441,7 @@ function App() {
       setEmail('')
       setContactConsent(false)
       setFiles([])
+      recordAgain()
     } catch (error) {
       setCaptureError(errorMessage(error))
     } finally {
@@ -447,11 +613,104 @@ function App() {
                     <span>WITNESS PACKET</span>
                     <span className="sheet-number">NEW / 01</span>
                   </div>
-                  <label className="field field--statement">
-                    <span>What happened?</span>
-                    <textarea value={message} onChange={(event) => setMessage(event.target.value)} minLength={1} maxLength={3000} required placeholder="Use the customer’s exact words. What did they expect, where did it break, and what is the consequence?" />
-                    <small>{message.length}/3000</small>
-                  </label>
+                  <div className="statement-block">
+                    <div className="statement-block__head">
+                      <span>01 CUSTOMER STATEMENT</span>
+                      {canRecordAudio && <Stamp tone="blue">VOICE → TEXT</Stamp>}
+                    </div>
+
+                    {statementMode === 'voice' && canRecordAudio ? (
+                      <div className="recorder-panel">
+                        {statementPhase === 'idle' && (
+                          <div className="recorder-idle">
+                            <button type="button" className="recorder-button" onClick={() => void startRecording()} aria-label="Record your statement">
+                              <span className="recorder-button__dot" />
+                            </button>
+                            <div>
+                              <b>Record your statement</b>
+                              <p>Speak naturally. Witness will turn this into text and keep the original voice as private evidence.</p>
+                            </div>
+                          </div>
+                        )}
+
+                        {statementPhase === 'recording' && (
+                          <div className="recorder-active">
+                            <button type="button" className="recorder-button recorder-button--stop" onClick={stopRecording} aria-label="Stop recording">
+                              <span className="recorder-button__square" />
+                            </button>
+                            <div className="recorder-active__body">
+                              <div className="recorder-active__head">
+                                <span className="recorder-timer">{formatSeconds(recordSeconds)}</span>
+                                <span className="recorder-status"><span className="record-dot" /> Recording</span>
+                              </div>
+                              <p>Speak naturally. Witness will turn this into text.</p>
+                              <div className="waveform">
+                                {waveform.map((height, index) => <span key={index} style={{ height: `${height}px` }} />)}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {statementPhase === 'transcribing' && (
+                          <div className="recorder-active">
+                            <button type="button" className="recorder-button recorder-button--busy" disabled aria-label="Transcribing">
+                              <span className="recorder-spinner" />
+                            </button>
+                            <div className="recorder-active__body">
+                              <span className="recorder-status">Transcribing…</span>
+                              <p>Turning your voice into an editable statement.</p>
+                            </div>
+                          </div>
+                        )}
+
+                        {statementPhase === 'ready' && (
+                          <div className="transcript-ready">
+                            <div className="transcript-ready__head">
+                              <span className="recorder-status"><span className="record-dot record-dot--done" /> Recording complete</span>
+                              <span>Speak naturally. Witness will turn this into text.</span>
+                            </div>
+                            <div className="waveform waveform--frozen">
+                              {waveform.map((height, index) => <span key={index} style={{ height: `${height}px` }} />)}
+                            </div>
+                            {editingTranscript ? (
+                              <textarea
+                                className="transcript-editor"
+                                value={message}
+                                onChange={(event) => setMessage(event.target.value)}
+                                maxLength={3000}
+                                autoFocus
+                                onBlur={() => setEditingTranscript(false)}
+                              />
+                            ) : (
+                              <blockquote className="transcript-quote">{message || 'No speech detected. Try recording again or edit this by hand.'}</blockquote>
+                            )}
+                            <div className="transcript-actions">
+                              <button type="button" onClick={toggleOriginalPlayback}>{isPlayingOriginal ? '⏸ PAUSE' : '▶ PLAY ORIGINAL'}</button>
+                              <button type="button" onClick={() => setEditingTranscript((value) => !value)}>✎ {editingTranscript ? 'DONE EDITING' : 'EDIT TRANSCRIPT'}</button>
+                              <button type="button" onClick={recordAgain}>↻ RECORD AGAIN</button>
+                            </div>
+                            {statementBlobUrl && (
+                              <audio
+                                ref={originalAudioRef}
+                                src={statementBlobUrl}
+                                onPlay={() => setIsPlayingOriginal(true)}
+                                onPause={() => setIsPlayingOriginal(false)}
+                                onEnded={() => setIsPlayingOriginal(false)}
+                              />
+                            )}
+                          </div>
+                        )}
+
+                        <button type="button" className="mode-toggle-link" onClick={() => setStatementMode('manual')}>Prefer to type your statement instead?</button>
+                      </div>
+                    ) : (
+                      <label className="field field--statement">
+                        <textarea value={message} onChange={(event) => setMessage(event.target.value)} minLength={1} maxLength={3000} required placeholder="Use the customer’s exact words. What did they expect, where did it break, and what is the consequence?" />
+                        <small>{message.length}/3000</small>
+                        {canRecordAudio && <button type="button" className="mode-toggle-link" onClick={() => setStatementMode('voice')}>Prefer to record your statement instead?</button>}
+                      </label>
+                    )}
+                  </div>
                   <div className="field-row">
                     <label className="field">
                       <span>What were you trying to do? <em>Optional</em></span>
@@ -467,11 +726,13 @@ function App() {
                     <span>It is okay to contact me about this report.</span>
                   </label>
                   <div className="evidence-upload">
-                    <div className="evidence-upload__label"><span className="evidence-marker">01</span><div><strong>Attach evidence</strong><small>Up to 3 files. Files stay private.</small></div></div>
-                    <label className="upload-trigger">
-                      <input type="file" accept="image/*,audio/*,video/*,.pdf,.txt,.doc,.docx" multiple onChange={onFilesChanged} />
-                      <span>SELECT FILES</span>
-                    </label>
+                    <div className="evidence-upload__label"><span className="evidence-marker">02</span><div><strong>Attach evidence (screenshots)</strong><small>{statementFile ? 'Up to 2 more files.' : 'Up to 3 files.'} Files stay private.</small></div></div>
+                    <div className="evidence-upload__controls">
+                      <label className="upload-trigger">
+                        <input type="file" accept="image/*,audio/*,video/*,.pdf,.txt,.doc,.docx" multiple onChange={onFilesChanged} />
+                        <span>SELECT FILES</span>
+                      </label>
+                    </div>
                     <div className="file-list">
                       {files.length ? files.map((file, index) => <span key={`${file.name}-${index}`}><b>{String(index + 1).padStart(2, '0')}</b> {file.name}</span>) : <span>No evidence attached yet.</span>}
                     </div>
@@ -479,7 +740,7 @@ function App() {
                   {captureError && <p className="form-error" role="alert">{captureError}</p>}
                   <div className="form-footer">
                     <p><WitnessMark compact /> Submitting creates a private record. No public profile. No shared inbox.</p>
-                    <button className="button button--primary" type="submit" disabled={captureBusy}>{captureBusy ? 'RECORDING…' : 'PUT IT ON THE RECORD'} <span>→</span></button>
+                    <button className="button button--primary" type="submit" disabled={captureBusy}>{captureBusy ? 'SAVING…' : 'PUT IT ON THE RECORD'} <span>→</span></button>
                   </div>
                 </form>
               )}
@@ -560,7 +821,21 @@ function App() {
                               {selectedPacket.ai_spam_reason && <p className="ai-assist__reason">{selectedPacket.ai_spam_reason}</p>}
                             </section>
                           )}
-                          <section className="evidence-board"><div className="evidence-board__head"><span>Evidence</span><span>{String(evidence.length).padStart(2, '0')} ITEMS</span></div>{evidence.length ? evidence.map((item, index) => <button className="evidence-tile" key={item.id} onClick={() => void openEvidence(item.id)}><span className="evidence-marker">{String(index + 1).padStart(2, '0')}</span><div><b>{item.label || `${humanize(item.kind)} evidence`}</b><small>{item.mime_type || humanize(item.kind)}</small></div><span className="evidence-tile__open">VIEW ↗</span></button>) : <div className="evidence-board__empty">No attachments. Customer statement is the primary evidence.</div>}</section>
+                          <section className="evidence-board">
+                            <div className="evidence-board__head"><span>Evidence</span><span>{String(evidence.length).padStart(2, '0')} ITEMS</span></div>
+                            {evidence.length ? evidence.map((item, index) => (
+                              <div className="evidence-item" key={item.id}>
+                                <button className="evidence-tile" onClick={() => void openEvidence(item.id)}>
+                                  <span className="evidence-marker">{String(index + 1).padStart(2, '0')}</span>
+                                  <div><b>{item.label || `${humanize(item.kind)} evidence`}</b><small>{item.mime_type || humanize(item.kind)}</small></div>
+                                  <span className="evidence-tile__open">VIEW ↗</span>
+                                </button>
+                                {item.kind === 'voice' && (
+                                  <p className="evidence-transcript">{item.transcript || 'Transcription unavailable for this recording.'}</p>
+                                )}
+                              </div>
+                            )) : <div className="evidence-board__empty">No attachments. Customer statement is the primary evidence.</div>}
+                          </section>
                           <section className="event-chain"><div className="event-chain__head"><span>CHAIN OF EVENTS</span><span className="red-thread" /></div>{events.map((item, index) => <div className={`event-row${item.visibility === 'public' ? ' event-row--public' : ''}`} key={item.id}><span>{String(index + 1).padStart(2, '0')}</span><div><b>{humanize(item.event_type)}</b><p>{item.message || 'Internal state changed.'}</p></div><time>{formatDate(item.created_date)}</time></div>)}</section>
                         </>
                       ) : <div className="packet-detail__empty"><WitnessMark /><h2>Select a packet.</h2><p>Every action leaves a visible chain of events.</p></div>}

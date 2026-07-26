@@ -2,6 +2,7 @@ import { createClientFromRequest } from "npm:@base44/sdk";
 import { error, json, optionsResponse, readJson } from "../../shared/http.ts";
 import { statusFor } from "../../shared/auth.ts";
 import { opaqueRef, optionalBoolean, optionalEmail, optionalString, optionalUrl, requiredString, SEVERITIES } from "../../shared/validation.ts";
+import { transcribeVoiceEvidence } from "../../shared/transcription.ts";
 
 const EVIDENCE_KINDS = ["screenshot", "voice", "video", "document", "link", "other"] as const;
 const CAPTURE_TYPES = ["screenshot", "voice", "video"] as const;
@@ -15,7 +16,13 @@ interface TriageAssist {
   ai_spam_reason?: string;
 }
 
-async function assistTriage(base44: any, message: string, pageTitle?: string, userIntent?: string): Promise<TriageAssist> {
+async function assistTriage(
+  base44: any,
+  message: string,
+  pageTitle?: string,
+  userIntent?: string,
+  voiceTranscripts?: string[],
+): Promise<TriageAssist> {
   try {
     const result = await base44.asServiceRole.integrations.Core.InvokeLLM({
       prompt: [
@@ -24,6 +31,7 @@ async function assistTriage(base44: any, message: string, pageTitle?: string, us
         `Report message: "${message}"`,
         pageTitle ? `Page: ${pageTitle}` : "",
         userIntent ? `What the customer was trying to do: ${userIntent}` : "",
+        voiceTranscripts?.length ? `Voice message transcript(s):\n${voiceTranscripts.join("\n---\n")}` : "",
         "",
         "Tasks:",
         "1. Write a one-sentence internal summary of the issue (max 160 characters).",
@@ -110,6 +118,7 @@ Deno.serve(async (req) => {
         label: optionalString(item.label, "evidence.label", 240),
         mime_type: optionalString(item.mime_type, "evidence.mime_type", 160),
         source_url: optionalUrl(item.source_url, "evidence.source_url"),
+        transcript: undefined as string | undefined,
       };
     });
 
@@ -118,9 +127,18 @@ Deno.serve(async (req) => {
       ...new Set(evidence.map((item) => CAPTURE_TYPES.includes(item.kind as typeof CAPTURE_TYPES[number]) ? item.kind : "other")),
     ];
 
+    const transcribedEvidence = await Promise.all(evidence.map(async (item) => {
+      if (item.kind !== "voice") return item;
+      const transcript = await transcribeVoiceEvidence(base44, item.file_uri);
+      return { ...item, transcript };
+    }));
+    const voiceTranscripts = transcribedEvidence
+      .filter((item) => item.kind === "voice" && item.transcript)
+      .map((item) => item.transcript as string);
+
     const pageTitle = optionalString(body.page_title, "page_title", 300);
     const userIntent = optionalString(body.user_intent, "user_intent", 500);
-    const assist = await assistTriage(base44, message, pageTitle, userIntent);
+    const assist = await assistTriage(base44, message, pageTitle, userIntent, voiceTranscripts);
     const looksLikeSpam = (assist.ai_spam_score ?? 0) >= SPAM_STATUS_THRESHOLD;
 
     const packet = await base44.asServiceRole.entities.WitnessPacket.create({
@@ -143,7 +161,7 @@ Deno.serve(async (req) => {
       ai_spam_reason: assist.ai_spam_reason,
     });
 
-    for (const item of evidence) {
+    for (const item of transcribedEvidence) {
       await base44.asServiceRole.entities.WitnessEvidence.create({
         packet_id: packet.id,
         ...item,

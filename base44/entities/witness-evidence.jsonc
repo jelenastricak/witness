@@ -14,7 +14,12 @@
     "label": { "type": "string", "maxLength": 240 },
     "mime_type": { "type": "string", "maxLength": 160 },
     "source_url": { "type": "string", "format": "uri" },
-    "created_by_kind": { "type": "string", "enum": ["reporter", "team", "system"], "default": "reporter" }
+    "created_by_kind": { "type": "string", "enum": ["reporter", "team", "system"], "default": "reporter" },
+    "transcript": {
+      "type": "string",
+      "maxLength": 5000,
+      "description": "Best-effort speech-to-text transcript for voice evidence. Advisory only, not authoritative."
+    }
   },
   "required": ["packet_id", "kind", "file_uri", "created_by_kind"],
   "rls": {
