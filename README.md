@@ -2,7 +2,12 @@
 
 Witness preserves customer-reported friction as an accountable packet: what the customer was trying to do, what they said, relevant context and private evidence, who owns the decision, and the visible outcome.
 
-This is a standalone Base44 backend. It was created as a fresh application in RaptorLabs’s Base44 Builder workspace, but it shares no Talon Audit, TypeMIC, or other product code, data, assets, or customer reports.
+This is a standalone Base44 backend. It was created as a fresh application in RaptorLabs's Base44 Builder workspace, but it shares no Talon Audit, TypeMIC, or other product code, data, assets, or customer reports.
+
+## Live
+
+- App: https://witness-c1b4526a.base44.app
+- Base44 app ID: `6a6536ab03664e73c1b4526a` (an app identifier, not a credential)
 
 ## Scope
 
@@ -21,24 +26,37 @@ The frontend is intentionally separate. Its integration contract is in `docs/fro
 - Private Base44 evidence storage; staff receive short-lived signed URLs only.
 - Realtime-ready entity subscriptions for the authenticated triage UI.
 
+## Frontend
+
+A single-page React app with three views — capture, public status lookup, and internal triage — styled as a case-file dossier: a dark sidebar, rounded cards, and color-coded status/severity throughout the triage dashboard. See `frontend/README.md` for local setup.
+
 ## Local structure
 
 ```
 base44/entities/       Data model and RLS
 base44/functions/      Server functions
 base44/shared/         Validation, auth, response, and serialization helpers
+frontend/              React + Vite client (capture, status, triage views)
 docs/                  Integration and security notes
 ```
 
-`base44/.app.jsonc` links this directory to the Base44 app and is deliberately ignored by Git.
+`base44/.app.jsonc` links this directory to the Base44 app and is deliberately ignored by Git; the app ID above is not a secret and can be passed via `--app-id` or `BASE44_APP_ID` instead.
 
 ## Deployment
 
 ```bash
-cd /home/hermes/witness
+npx base44 login                       # first time only
+npx base44 link --app-id <your-app-id> # binds this folder to your Base44 app
+npx base44 deploy --yes                # entities, functions, and site in one step
+```
+
+Or step by step:
+
+```bash
 npx base44 entities push
-npx base44 types generate
 npx base44 functions deploy
+cd frontend && npm install && npm run build && cd ..
+npx base44 site deploy --yes
 ```
 
 ## Verified backend flow
