@@ -533,7 +533,10 @@ function App() {
     }
 
     if (!isAdmin) {
-      base44.auth.redirectToLogin(window.location.href)
+      const loginUrl = new URL('https://app.base44.com/login')
+      loginUrl.searchParams.set('app_id', APP_ID)
+      loginUrl.searchParams.set('from_url', window.location.href)
+      window.location.href = loginUrl.toString()
       return
     }
 
