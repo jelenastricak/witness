@@ -98,8 +98,23 @@ function WitnessMark({ compact = false }: { compact?: boolean }) {
   )
 }
 
-function Stamp({ children, tone = 'ink' }: { children: ReactNode; tone?: 'ink' | 'red' | 'blue' }) {
+type Tone = 'ink' | 'red' | 'blue' | 'green'
+
+function Stamp({ children, tone = 'ink' }: { children: ReactNode; tone?: Tone }) {
   return <span className={`stamp stamp--${tone}`}>{children}</span>
+}
+
+function toneForStatus(status?: PacketStatus): Tone {
+  if (status === 'resolved') return 'green'
+  if (status === 'acknowledged' || status === 'investigating') return 'blue'
+  if (status === 'closed' || status === 'spam') return 'ink'
+  return 'red'
+}
+
+function toneForSeverity(severity?: Severity): Tone {
+  if (severity === 'critical' || severity === 'high') return 'red'
+  if (severity === 'medium') return 'blue'
+  return 'ink'
 }
 
 function App() {
@@ -462,7 +477,7 @@ function App() {
                 <div className="outcome-sheet__head"><span>PUBLIC OUTCOME</span><span className="red-bracket" /></div>
                 {publicStatus ? (
                   <>
-                    <div className="outcome-sheet__status"><Stamp tone={publicStatus.witness.status === 'resolved' ? 'red' : 'ink'}>{humanize(publicStatus.witness.status)}</Stamp><span>{publicStatus.witness.public_ref}</span></div>
+                    <div className="outcome-sheet__status"><Stamp tone={toneForStatus(publicStatus.witness.status)}>{humanize(publicStatus.witness.status)}</Stamp><span>{publicStatus.witness.public_ref}</span></div>
                     <blockquote>“{publicStatus.witness.message}”</blockquote>
                     {publicStatus.witness.resolution_summary && <div className="resolution-note"><span>RESOLUTION</span><p>{publicStatus.witness.resolution_summary}</p></div>}
                     <ol className="public-timeline">
@@ -492,15 +507,15 @@ function App() {
                   <div className="operator-grid">
                     <aside className="packet-inbox">
                       <div className="packet-inbox__head"><span>INBOX</span><span>{packets.length}</span></div>
-                      {packets.length ? packets.map((packet, index) => <button key={packet.id} onClick={() => setSelectedId(packet.id)} className={`packet-row${packet.id === selectedId ? ' is-selected' : ''}`}><span className="packet-row__index">{String(index + 1).padStart(2, '0')}</span><span className="packet-row__body"><b>{packet.page_title || 'Customer report'}</b><small>{packet.message}</small><em>{humanize(packet.status)}</em></span></button>) : <div className="packet-inbox__empty">No live packets.<br />The record is clear.</div>}
+                      {packets.length ? packets.map((packet, index) => <button key={packet.id} onClick={() => setSelectedId(packet.id)} className={`packet-row${packet.id === selectedId ? ' is-selected' : ''}`}><span className="packet-row__index">{String(index + 1).padStart(2, '0')}</span><span className="packet-row__body"><b>{packet.page_title || 'Customer report'}</b><small>{packet.message}</small><em className={`tone-${toneForStatus(packet.status)}`}>{humanize(packet.status)}</em></span></button>) : <div className="packet-inbox__empty">No live packets.<br />The record is clear.</div>}
                     </aside>
 
                     <article className="packet-detail">
                       {selectedPacket ? (
                         <>
-                          <div className="packet-detail__head"><span>WITNESS PACKET / {selectedPacket.public_ref.slice(-8)}</span><Stamp tone={selectedPacket.status === 'resolved' ? 'red' : 'ink'}>{humanize(selectedPacket.status)}</Stamp></div>
+                          <div className="packet-detail__head"><span>WITNESS PACKET / {selectedPacket.public_ref.slice(-8)}</span><Stamp tone={toneForStatus(selectedPacket.status)}>{humanize(selectedPacket.status)}</Stamp></div>
                           <div className="packet-detail__quote"><span className="oversized-quote">“</span><blockquote>{selectedPacket.message}</blockquote></div>
-                          <div className="packet-metadata"><span><b>Submitted</b>{formatDate(selectedPacket.created_date)}</span><span><b>Context</b>{selectedPacket.page_title || selectedPacket.page_url || 'Not supplied'}</span><span><b>Severity</b>{humanize(selectedPacket.severity)}</span></div>
+                          <div className="packet-metadata"><span><b>Submitted</b>{formatDate(selectedPacket.created_date)}</span><span><b>Context</b>{selectedPacket.page_title || selectedPacket.page_url || 'Not supplied'}</span><span><b>Severity</b><em className={`tone-${toneForSeverity(selectedPacket.severity)}`}>{humanize(selectedPacket.severity)}</em></span></div>
                           <section className="evidence-board"><div className="evidence-board__head"><span>Evidence</span><span>{String(evidence.length).padStart(2, '0')} ITEMS</span></div>{evidence.length ? evidence.map((item, index) => <button className="evidence-tile" key={item.id} onClick={() => void openEvidence(item.id)}><span className="evidence-marker">{String(index + 1).padStart(2, '0')}</span><div><b>{item.label || `${humanize(item.kind)} evidence`}</b><small>{item.mime_type || humanize(item.kind)}</small></div><span className="evidence-tile__open">VIEW ↗</span></button>) : <div className="evidence-board__empty">No attachments. Customer statement is the primary evidence.</div>}</section>
                           <section className="event-chain"><div className="event-chain__head"><span>CHAIN OF EVENTS</span><span className="red-thread" /></div>{events.map((item, index) => <div className={`event-row${item.visibility === 'public' ? ' event-row--public' : ''}`} key={item.id}><span>{String(index + 1).padStart(2, '0')}</span><div><b>{humanize(item.event_type)}</b><p>{item.message || 'Internal state changed.'}</p></div><time>{formatDate(item.created_date)}</time></div>)}</section>
                         </>
