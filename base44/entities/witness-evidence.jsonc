@@ -1,0 +1,31 @@
+{
+  "name": "WitnessEvidence",
+  "description": "A media or contextual artefact attached to a Witness Packet.",
+  "type": "object",
+  "properties": {
+    "packet_id": { "type": "string" },
+    "kind": { "type": "string", "enum": ["screenshot", "voice", "video", "document", "link", "other"] },
+    "file_uri": {
+      "type": "string",
+      "minLength": 9,
+      "maxLength": 2048,
+      "description": "Private Base44 storage URI. Never expose directly to the reporter or public status endpoint."
+    },
+    "label": { "type": "string", "maxLength": 240 },
+    "mime_type": { "type": "string", "maxLength": 160 },
+    "source_url": { "type": "string", "format": "uri" },
+    "created_by_kind": { "type": "string", "enum": ["reporter", "team", "system"], "default": "reporter" }
+  },
+  "required": ["packet_id", "kind", "file_uri", "created_by_kind"],
+  "rls": {
+    "create": { "user_condition": { "role": "admin" } },
+    "read": {
+      "$or": [
+        { "user_condition": { "role": "admin" } },
+        { "user_condition": { "role": "user" } }
+      ]
+    },
+    "update": { "user_condition": { "role": "admin" } },
+    "delete": { "user_condition": { "role": "admin" } }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "name": "WitnessEvent",
+  "description": "An append-only accountability event in a Witness Packet timeline.",
+  "type": "object",
+  "properties": {
+    "packet_id": { "type": "string" },
+    "event_type": {
+      "type": "string",
+      "enum": ["submitted", "acknowledged", "investigating", "assigned", "resolved", "closed", "reopened", "marked_spam", "note"]
+    },
+    "message": { "type": "string", "maxLength": 3000 },
+    "visibility": { "type": "string", "enum": ["public", "internal"], "default": "internal" },
+    "actor_kind": { "type": "string", "enum": ["reporter", "team", "system"], "default": "system" },
+    "actor_email": {
+      "type": "string",
+      "format": "email",
+      "rls": {
+        "read": { "user_condition": { "role": "admin" } },
+        "write": { "user_condition": { "role": "admin" } }
+      }
+    }
+  },
+  "required": ["packet_id", "event_type", "visibility", "actor_kind"],
+  "rls": {
+    "create": { "user_condition": { "role": "admin" } },
+    "read": {
+      "$or": [
+        { "user_condition": { "role": "admin" } },
+        { "user_condition": { "role": "user" } }
+      ]
+    },
+    "update": false,
+    "delete": { "user_condition": { "role": "admin" } }
+  }
+}

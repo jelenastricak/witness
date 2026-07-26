@@ -1,0 +1,66 @@
+{
+  "name": "WitnessPacket",
+  "description": "The structured, accountable record of a customer-reported experience.",
+  "type": "object",
+  "properties": {
+    "site_id": { "type": "string" },
+    "public_ref": {
+      "type": "string",
+      "minLength": 20,
+      "description": "Opaque customer-facing tracking reference. Never expose the database ID publicly."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["new", "acknowledged", "investigating", "resolved", "closed", "spam"],
+      "default": "new"
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["unknown", "low", "medium", "high", "critical"],
+      "default": "unknown"
+    },
+    "message": { "type": "string", "minLength": 1, "maxLength": 3000 },
+    "page_url": { "type": "string", "format": "uri" },
+    "page_title": { "type": "string", "maxLength": 300 },
+    "user_intent": { "type": "string", "maxLength": 500 },
+    "capture_types": {
+      "type": "array",
+      "items": { "type": "string", "enum": ["text", "screenshot", "voice", "video", "other"] }
+    },
+    "evidence_count": { "type": "integer", "minimum": 0, "maximum": 3, "default": 0 },
+    "reporter_name": {
+      "type": "string",
+      "maxLength": 160,
+      "rls": {
+        "read": { "user_condition": { "role": "admin" } },
+        "write": { "user_condition": { "role": "admin" } }
+      }
+    },
+    "reporter_email": {
+      "type": "string",
+      "format": "email",
+      "rls": {
+        "read": { "user_condition": { "role": "admin" } },
+        "write": { "user_condition": { "role": "admin" } }
+      }
+    },
+    "contact_consent": { "type": "boolean", "default": false },
+    "assigned_to_email": { "type": "string", "format": "email" },
+    "resolution_summary": { "type": "string", "maxLength": 3000 },
+    "acknowledged_at": { "type": "string", "format": "date-time" },
+    "resolved_at": { "type": "string", "format": "date-time" },
+    "last_public_update_at": { "type": "string", "format": "date-time" }
+  },
+  "required": ["site_id", "public_ref", "status", "message", "capture_types", "contact_consent"],
+  "rls": {
+    "create": { "user_condition": { "role": "admin" } },
+    "read": {
+      "$or": [
+        { "user_condition": { "role": "admin" } },
+        { "user_condition": { "role": "user" } }
+      ]
+    },
+    "update": { "user_condition": { "role": "admin" } },
+    "delete": { "user_condition": { "role": "admin" } }
+  }
+}

@@ -1,0 +1,11 @@
+# Base44 project binding: keep the app ID out of version control.
+base44/.app.jsonc
+
+# Generated Base44 agent reference packs
+.agents/
+skills-lock.json
+
+# Generated types and local tool state
+base44/.types/
+node_modules/
+.DS_Store
