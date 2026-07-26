@@ -225,6 +225,17 @@ h1 { max-width: 800px; font: clamp(42px, 5.3vw, 82px)/0.94 var(--display); lette
 .packet-metadata span:last-child { border: 0; }
 .packet-metadata b { display: block; margin-bottom: 4px; font: 600 8px/1 var(--mono); letter-spacing: 0.07em; text-transform: uppercase; color: rgba(17, 17, 17, 0.5); }
 .packet-metadata em { font-style: normal; font-weight: 600; }
+.ai-assist { margin-top: 18px; padding: 14px 16px; border-radius: var(--radius-sm); background: linear-gradient(135deg, rgba(49, 92, 255, 0.08), rgba(228, 61, 48, 0.06)); border: 1px solid rgba(49, 92, 255, 0.2); }
+.ai-assist__head { display: flex; justify-content: space-between; align-items: center; font: 600 9px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--blue); }
+.ai-assist__head span:last-child { color: rgba(17, 17, 17, 0.4); text-transform: none; letter-spacing: 0; font-style: italic; }
+.ai-assist__summary { margin: 10px 0; font: 600 15px/1.35 var(--condensed); }
+.ai-assist__row { display: flex; flex-wrap: wrap; gap: 16px; font: 11px/1 var(--sans); color: rgba(17, 17, 17, 0.6); }
+.ai-assist__row em { font-style: normal; font-weight: 700; margin-left: 4px; }
+.ai-assist__reason { margin: 8px 0 0; font: 12px/1.4 var(--sans); color: rgba(17, 17, 17, 0.55); }
+
+.ai-draft-button { appearance: none; width: 100%; margin: -8px 0 15px; padding: 7px 10px; border-radius: var(--radius-sm); border: 1px dashed rgba(49, 92, 255, 0.4); background: rgba(49, 92, 255, 0.06); color: var(--blue); font: 600 10px/1 var(--mono); letter-spacing: 0.05em; cursor: pointer; }
+.ai-draft-button:hover:not(:disabled) { background: rgba(49, 92, 255, 0.12); }
+
 .evidence-board { margin-top: 23px; }
 .evidence-board__head, .event-chain__head { display: flex; justify-content: space-between; align-items: center; padding-bottom: 8px; border-bottom: 1px solid var(--subtle-line); font: 600 10px/1 var(--mono); letter-spacing: 0.07em; }
 .evidence-board__head span:first-child { display: inline-flex; align-items: center; background: var(--ink); color: var(--paper); padding: 6px 10px; border-radius: var(--radius-sm); }

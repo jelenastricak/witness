@@ -21,6 +21,10 @@ type WitnessPacket = {
   resolution_summary?: string
   reporter_email?: string
   evidence_count?: number
+  ai_summary?: string
+  ai_suggested_severity?: Severity
+  ai_spam_score?: number
+  ai_spam_reason?: string
 }
 
 type WitnessEvidence = {
@@ -117,6 +121,13 @@ function toneForSeverity(severity?: Severity): Tone {
   return 'ink'
 }
 
+function toneForRisk(score?: number): Tone {
+  if (score === undefined) return 'ink'
+  if (score >= 0.66) return 'red'
+  if (score >= 0.33) return 'blue'
+  return 'green'
+}
+
 function App() {
   const [view, setView] = useState<View>('capture')
   const [message, setMessage] = useState('')
@@ -141,6 +152,7 @@ function App() {
   const [triageBusy, setTriageBusy] = useState(false)
   const [publicMessage, setPublicMessage] = useState('')
   const [resolution, setResolution] = useState('')
+  const [draftingField, setDraftingField] = useState<'public_message' | 'resolution_summary' | ''>('')
 
   const selectedPacket = packets.find((packet) => packet.id === selectedId) ?? null
   const imageFile = useMemo(() => files.find(isImage), [files])
@@ -314,6 +326,27 @@ function App() {
       setTriageError(errorMessage(error))
     } finally {
       setTriageBusy(false)
+    }
+  }
+
+  async function draftWithAI(field: 'public_message' | 'resolution_summary') {
+    if (!selectedPacket) return
+    setTriageError('')
+
+    try {
+      setDraftingField(field)
+      const client = requireBase44() as any
+      const result = await client.functions.invoke('draft-public-update', {
+        packet_id: selectedPacket.id,
+        field,
+      })
+      const draft = result.data.draft as string
+      if (field === 'public_message') setPublicMessage(draft)
+      else setResolution(draft)
+    } catch (error) {
+      setTriageError(errorMessage(error))
+    } finally {
+      setDraftingField('')
     }
   }
 
@@ -516,6 +549,17 @@ function App() {
                           <div className="packet-detail__head"><span>WITNESS PACKET / {selectedPacket.public_ref.slice(-8)}</span><Stamp tone={toneForStatus(selectedPacket.status)}>{humanize(selectedPacket.status)}</Stamp></div>
                           <div className="packet-detail__quote"><span className="oversized-quote">“</span><blockquote>{selectedPacket.message}</blockquote></div>
                           <div className="packet-metadata"><span><b>Submitted</b>{formatDate(selectedPacket.created_date)}</span><span><b>Context</b>{selectedPacket.page_title || selectedPacket.page_url || 'Not supplied'}</span><span><b>Severity</b><em className={`tone-${toneForSeverity(selectedPacket.severity)}`}>{humanize(selectedPacket.severity)}</em></span></div>
+                          {(selectedPacket.ai_summary || selectedPacket.ai_suggested_severity || selectedPacket.ai_spam_score !== undefined) && (
+                            <section className="ai-assist">
+                              <div className="ai-assist__head"><span>AI Assist</span><span>Advisory only</span></div>
+                              {selectedPacket.ai_summary && <p className="ai-assist__summary">{selectedPacket.ai_summary}</p>}
+                              <div className="ai-assist__row">
+                                {selectedPacket.ai_suggested_severity && <span>Suggested severity <em className={`tone-${toneForSeverity(selectedPacket.ai_suggested_severity)}`}>{humanize(selectedPacket.ai_suggested_severity)}</em></span>}
+                                {selectedPacket.ai_spam_score !== undefined && <span>Spam risk <em className={`tone-${toneForRisk(selectedPacket.ai_spam_score)}`}>{Math.round(selectedPacket.ai_spam_score * 100)}%</em></span>}
+                              </div>
+                              {selectedPacket.ai_spam_reason && <p className="ai-assist__reason">{selectedPacket.ai_spam_reason}</p>}
+                            </section>
+                          )}
                           <section className="evidence-board"><div className="evidence-board__head"><span>Evidence</span><span>{String(evidence.length).padStart(2, '0')} ITEMS</span></div>{evidence.length ? evidence.map((item, index) => <button className="evidence-tile" key={item.id} onClick={() => void openEvidence(item.id)}><span className="evidence-marker">{String(index + 1).padStart(2, '0')}</span><div><b>{item.label || `${humanize(item.kind)} evidence`}</b><small>{item.mime_type || humanize(item.kind)}</small></div><span className="evidence-tile__open">VIEW ↗</span></button>) : <div className="evidence-board__empty">No attachments. Customer statement is the primary evidence.</div>}</section>
                           <section className="event-chain"><div className="event-chain__head"><span>CHAIN OF EVENTS</span><span className="red-thread" /></div>{events.map((item, index) => <div className={`event-row${item.visibility === 'public' ? ' event-row--public' : ''}`} key={item.id}><span>{String(index + 1).padStart(2, '0')}</span><div><b>{humanize(item.event_type)}</b><p>{item.message || 'Internal state changed.'}</p></div><time>{formatDate(item.created_date)}</time></div>)}</section>
                         </>
@@ -525,8 +569,16 @@ function App() {
                     <aside className="ownership-strip">
                       <div className="ownership-strip__top"><Stamp tone="red">OWNERSHIP</Stamp><span className="vertical-witness" /></div>
                       <p>Accept the work. State what changes. Let the customer know.</p>
-                      <label className="field"><span>Public update</span><textarea value={publicMessage} onChange={(event) => setPublicMessage(event.target.value)} maxLength={3000} placeholder="What can the customer be told now?" /></label>
-                      <label className="field"><span>Resolution record</span><textarea value={resolution} onChange={(event) => setResolution(event.target.value)} maxLength={3000} placeholder="What was fixed, changed, or decided?" /></label>
+                      <label className="field">
+                        <span>Public update</span>
+                        <textarea value={publicMessage} onChange={(event) => setPublicMessage(event.target.value)} maxLength={3000} placeholder="What can the customer be told now?" />
+                      </label>
+                      <button type="button" className="ai-draft-button" disabled={!selectedPacket || draftingField !== ''} onClick={() => void draftWithAI('public_message')}>{draftingField === 'public_message' ? 'DRAFTING…' : '✦ DRAFT WITH AI'}</button>
+                      <label className="field">
+                        <span>Resolution record</span>
+                        <textarea value={resolution} onChange={(event) => setResolution(event.target.value)} maxLength={3000} placeholder="What was fixed, changed, or decided?" />
+                      </label>
+                      <button type="button" className="ai-draft-button" disabled={!selectedPacket || draftingField !== ''} onClick={() => void draftWithAI('resolution_summary')}>{draftingField === 'resolution_summary' ? 'DRAFTING…' : '✦ DRAFT WITH AI'}</button>
                       <div className="ownership-actions"><button className="button button--secondary" disabled={!selectedPacket || triageBusy} onClick={() => void runTriage('acknowledge')}>SEEN</button><button className="button button--secondary" disabled={!selectedPacket || triageBusy} onClick={() => void runTriage('investigate')}>INVESTIGATE</button><button className="button button--primary" disabled={!selectedPacket || triageBusy} onClick={() => void runTriage('resolve')}>{triageBusy ? 'SAVING…' : 'MARK FIXED'}</button></div>
                     </aside>
                   </div>

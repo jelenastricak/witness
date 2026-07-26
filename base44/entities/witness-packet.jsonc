@@ -47,6 +47,23 @@
     "contact_consent": { "type": "boolean", "default": false },
     "assigned_to_email": { "type": "string", "format": "email" },
     "resolution_summary": { "type": "string", "maxLength": 3000 },
+    "ai_summary": {
+      "type": "string",
+      "maxLength": 400,
+      "description": "AI-generated one-line internal summary, a triage aid only. Never authoritative."
+    },
+    "ai_suggested_severity": {
+      "type": "string",
+      "enum": ["unknown", "low", "medium", "high", "critical"],
+      "description": "AI-suggested severity. Advisory only; admins set the real severity field."
+    },
+    "ai_spam_score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "AI-estimated likelihood (0-1) that the submission is spam or abuse."
+    },
+    "ai_spam_reason": { "type": "string", "maxLength": 300 },
     "acknowledged_at": { "type": "string", "format": "date-time" },
     "resolved_at": { "type": "string", "format": "date-time" },
     "last_public_update_at": { "type": "string", "format": "date-time" }

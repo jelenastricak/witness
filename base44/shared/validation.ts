@@ -1,5 +1,7 @@
 const MAX_URL_LENGTH = 2048;
 
+export const SEVERITIES = ["unknown", "low", "medium", "high", "critical"] as const;
+
 export function requiredString(value: unknown, field: string, maxLength: number): string {
   if (typeof value !== "string") throw new Error(`${field} must be text`);
   const output = value.trim();

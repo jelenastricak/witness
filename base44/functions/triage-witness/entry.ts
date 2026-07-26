@@ -1,10 +1,9 @@
 import { createClientFromRequest } from "npm:@base44/sdk";
 import { error, json, optionsResponse, readJson } from "../../shared/http.ts";
 import { requireAdmin, statusFor } from "../../shared/auth.ts";
-import { enumValue, optionalEmail, optionalString, requiredString } from "../../shared/validation.ts";
+import { enumValue, optionalEmail, optionalString, requiredString, SEVERITIES } from "../../shared/validation.ts";
 
 const ACTIONS = ["acknowledge", "investigate", "resolve", "close", "reopen", "mark_spam"] as const;
-const SEVERITIES = ["unknown", "low", "medium", "high", "critical"] as const;
 
 const stateForAction: Record<typeof ACTIONS[number], string> = {
   acknowledge: "acknowledged",
