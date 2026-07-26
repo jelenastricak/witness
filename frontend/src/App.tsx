@@ -533,10 +533,7 @@ function App() {
     }
 
     if (!isAdmin) {
-      const loginUrl = new URL('https://app.base44.com/login')
-      loginUrl.searchParams.set('app_id', APP_ID)
-      loginUrl.searchParams.set('from_url', window.location.href)
-      window.location.href = loginUrl.toString()
+      base44.auth.loginWithProvider('google', window.location.href)
       return
     }
 

@@ -1,0 +1,94 @@
+WITNESS — BaaS FEEDBACK
+Dev Build-Off submission (mandatory feedback section)
+
+WHAT BaaS CAPABILITIES WORKED WELL / FELT GREAT TO USE
+
+- InvokeLLM with response_json_schema was the single most useful primitive
+  in the whole build. Passing a JSON schema and getting back a typed object
+  (severity, spam score, summary) with no manual parsing made the AI-assist
+  features fast to wire in and reliable to test.
+- Private file storage plus CreateFileSignedUrl mapped cleanly onto the
+  actual security model we needed: reporters upload evidence anonymously,
+  only admins can ever mint a (short-lived) URL to view it. Didn't have to
+  invent anything custom for that.
+- `base44 deploy` as one command for entities + functions + site, with a
+  per-function changed/unchanged diff, made iterating fast — redeploys
+  after a small change came back in seconds, and it was obvious when
+  something hadn't actually changed.
+- `base44 exec` (run a script pre-authenticated with the SDK) was genuinely
+  great for one-off admin queries and cleanup against the live app without
+  writing and then deleting a throwaway function every time.
+- Secrets management (`base44 secrets set/list`) was simple and kept the
+  ElevenLabs key out of client code and out of git without any extra setup.
+
+WHERE WE GOT STUCK / CONFUSED / BLOCKED
+
+- The biggest one: `base44.auth.redirectToLogin()` silently breaks for a
+  hand-coded external frontend. The client defaults `appBaseUrl` to an
+  empty string unless you pass it explicitly, so the "redirect to login"
+  URL resolves as a relative path against the calling app's own origin
+  instead of Base44's platform origin. For a single-page app with no
+  router (very common for a small internal tool), this means clicking
+  "sign in" does *nothing visible at all* — no error, no navigation, it
+  just silently re-renders the current view. Even after passing
+  `appBaseUrl` explicitly, the generic `/login` chooser page still doesn't
+  carry through the app context (`app_id`) to know where to send the user
+  back after signing in — if the browser already has an active Base44
+  platform session, it drops the user into their general workspace
+  instead of back into the app. The only path we found that reliably
+  works is calling `loginWithProvider('google', fromUrl)` directly, which
+  hits a completely different endpoint (`/api/apps/auth/login`) that does
+  correctly embed `app_id` and `from_url` in the OAuth `state`. Finding
+  that took real reverse-engineering (comparing SDK source for
+  `redirectToLogin` vs `loginWithProvider`, testing both URLs directly),
+  not something discoverable from the docs.
+- Base44 account hit a free-tier limit of 5 apps partway through the
+  build, blocking `base44 link --create` for a fresh app. There's no CLI
+  command to see which apps in a workspace are actually using that quota
+  — had to fall back to guessing/asking the account owner which existing
+  app ID to reuse.
+- The dev environment had no git, Node, or Deno preinstalled, which isn't
+  a Base44 issue directly, but is worth naming because the CLI's own
+  install docs assume those are already present — a "bring your own
+  sandboxed dev box" story would benefit from the CLI detecting and
+  offering to install its own runtime deps.
+
+WHAT WAS MISSING, OR WHAT WOULD WE ADD
+
+- A first-party speech-to-text Core integration. `InvokeLLM` and
+  `GenerateImage` are both one call away; having to bring our own
+  ElevenLabs key and call their REST API directly from a function for
+  transcription was the one place the "AI is a first-class Base44
+  capability" story had a gap.
+- Clearer documentation (or a dedicated guide) for apps that are hand-coded
+  externally and only touch Base44 through the SDK/CLI, as opposed to apps
+  built and hosted through the visual no-code builder. Several auth details
+  (`appBaseUrl` marked `@internal`, `loginWithProvider`'s iframe-vs-popup
+  branching, what actually happens post-login for a plain `createClient()`
+  app) read as assuming the app is running inside Base44's own app-preview
+  iframe, which a CLI-deployed static site is not.
+- A CLI command to list apps and their workspace/quota usage, to avoid the
+  free-app-limit surprise above.
+
+ANY BUGS OR ROUGH EDGES
+
+- Concretely: `createClient()` should either default `appBaseUrl` to the
+  real platform origin (`https://app.base44.com`) instead of an empty
+  string, or `redirectToLogin()` should throw/warn loudly when it's about
+  to build a same-origin relative URL instead of silently doing it. A
+  broken redirect that produces zero console output and zero visible
+  change is the worst failure mode to debug.
+
+ANYTHING ELSE / OVERALL EXPERIENCE
+
+The backend depth is genuinely there — schema-level RLS, private storage,
+scoped secrets, realtime subscriptions, and one-command deploys made it
+possible to build a credible, AI-forward, voice-enabled internal tool
+from scratch in about two days. Almost all of the friction we hit was at
+the boundary of "I wrote my own React frontend and only talk to Base44
+through the SDK/CLI" rather than in the backend primitives themselves,
+which mostly just worked as documented.
+
+How likely to keep using Base44's backend: 8/10 — strong enough that the
+auth-redirect issue above is worth fixing properly rather than a reason
+to look elsewhere.
