@@ -25,17 +25,37 @@ The frontend is intentionally separate. Its integration contract is in `docs/fro
 - Authenticated internal triage with an append-only event timeline.
 - Private Base44 evidence storage; staff receive short-lived signed URLs only.
 - Realtime-ready entity subscriptions for the authenticated triage UI.
+- AI triage assist on submission: `InvokeLLM` generates an internal one-line summary, suggests a severity, and scores spam/abuse likelihood (auto-flagging high-confidence spam) — all advisory, never overriding admin judgment.
+- AI-drafted customer updates and resolution records that an admin reviews and edits before sending.
+- Voice-to-text: reporters can record a spoken statement in the browser; it's transcribed immediately (ElevenLabs Scribe) into an editable statement, and the original recording is kept as private evidence.
+
+## Functions
+
+| Function | Access | Purpose |
+| --- | --- | --- |
+| `submit-witness` | public | Validates and creates a packet + evidence; runs AI triage assist |
+| `public-witness-status` | public | Capability-style status lookup by `public_ref` |
+| `transcribe-voice` | public (site-scoped) | Immediate speech-to-text for the capture form's voice recorder |
+| `triage-witness` | admin | State transitions with append-only timeline events |
+| `draft-public-update` | admin | AI-drafted customer update or resolution record |
+| `get-evidence-access` | admin | Short-lived signed URL for private evidence |
+| `create-site` | admin | Registers a new capture surface (`WitnessSite`) |
+| `dashboard-summary` | admin | Triage dashboard counts |
+
+## Secrets
+
+- `11Labs` — ElevenLabs API key, used server-side only by `transcribe-voice` and the submission-time voice-evidence transcription. Set via `npx base44 secrets set 11Labs=<key>`.
 
 ## Frontend
 
-A single-page React app with three views — capture, public status lookup, and internal triage — styled as a case-file dossier: a dark sidebar, rounded cards, and color-coded status/severity throughout the triage dashboard. See `frontend/README.md` for local setup.
+A single-page React app with three views — capture, public status lookup, and internal triage — styled as a case-file dossier: a dark sidebar, rounded cards, and color-coded status/severity throughout the triage dashboard. Capture defaults to a voice recorder (live waveform, immediate transcription, editable result) with manual typing as a fallback. See `frontend/README.md` for local setup.
 
 ## Local structure
 
 ```
 base44/entities/       Data model and RLS
 base44/functions/      Server functions
-base44/shared/         Validation, auth, response, and serialization helpers
+base44/shared/         Validation, auth, response, serialization, and voice-transcription helpers
 frontend/              React + Vite client (capture, status, triage views)
 docs/                  Integration and security notes
 ```
@@ -75,4 +95,4 @@ Temporary database test records were deleted after verification. Private storage
 
 ## Production boundary
 
-This is a credible backend foundation, not a finished public SaaS. Before exposing a public capture form to real traffic, add a durable abuse-control layer (for example Cloudflare Turnstile verification plus rate limits) and define retention/deletion policy for evidence and reporter data.
+This is a credible backend foundation, not a finished public SaaS. Before exposing a public capture form to real traffic, add a durable abuse-control layer (for example Cloudflare Turnstile verification plus rate limits) and define retention/deletion policy for evidence and reporter data. The same abuse-control gap applies to the AI and transcription calls: each submission triggers an `InvokeLLM` call, and each voice note triggers an ElevenLabs transcription (once immediately in the browser, once again server-side when the evidence record is created) — both cost money per call and both are currently gated only by the same honeypot/origin checks as the rest of the public endpoint.

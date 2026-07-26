@@ -1,0 +1,84 @@
+WITNESS — PROJECT WRITE-UP
+Dev Build-Off submission
+
+WHAT IT IS
+
+Witness turns a customer complaint into an accountable record instead of a
+message that disappears into a support queue. A reporter describes what
+happened — by typing or by speaking, with the recording transcribed on the
+spot — attaches up to three pieces of private evidence, and gets back an
+opaque tracking reference. Staff triage the packet, own it, and resolve it;
+the reporter can check a public status page at any time that shows only the
+outcome, never internal notes or raw evidence.
+
+Live: https://witness-c1b4526a.base44.app
+Repo: https://github.com/jelenastricak/witness
+
+HOW IT'S BUILT
+
+Everything lives on a single Base44 backend: four entities (WitnessSite,
+WitnessPacket, WitnessEvidence, WitnessEvent) with role-based RLS baked
+directly into the schema, and eight Deno server functions that are the only
+way to touch the data — there are no direct entity mutations from the
+client for anything that represents a workflow decision. Reporter identity
+fields (name, email) and event actor emails are admin-only at the schema
+level, not just hidden in the UI. Evidence is uploaded to Base44's private
+storage; the only way to view it is a signed URL minted per request by an
+admin-only function, expiring in under 15 minutes.
+
+The frontend is a single-page React app with three views — capture, public
+status lookup, and internal triage — built to read like a case file:
+customer statements framed as quoted testimony, an append-only "chain of
+events" for every packet, and color-coded status/severity so an operator
+can scan the inbox at a glance.
+
+BACKEND DEPTH: WHERE THE AI LIVES
+
+The brief asked for AI that's actually load-bearing, not a bolt-on demo, so
+it's wired into the parts of the workflow that are normally manual and
+error-prone:
+
+- On submission, an LLM call reads the report (plus any voice transcript)
+  and returns a one-line internal summary, a suggested severity, and a
+  spam-likelihood score with a reason — all stored as advisory fields the
+  admin can see but that never override what the admin actually sets.
+  Submissions that score above a confidence threshold are auto-flagged as
+  spam, with the reasoning logged as an internal timeline event so nothing
+  happens silently.
+- In triage, an admin can ask for an AI-drafted customer update or
+  resolution record, generated from the packet's context and the admin's
+  internal note. It's a starting point to edit, not something that sends
+  itself — the human stays the one who decides what the customer hears.
+- The capture form's primary input is a voice recorder, not a text box: a
+  live waveform (Web Audio API, not a canned animation) while recording,
+  then an immediate call out to ElevenLabs for transcription the moment
+  the reporter stops. The transcript becomes the editable statement text,
+  and the original clip is still kept as private evidence — the product's
+  whole premise is preserving the original account, so transcribing it
+  was never a reason to throw the recording away.
+
+DECISIONS AND TRADE-OFFS
+
+- Every AI/LLM output is explicitly advisory. The schema comments and the
+  UI both say so ("Advisory only, not authoritative") because a mis-scored
+  severity or a bad transcript should degrade triage, not corrupt it.
+- The voice clip gets transcribed twice — once immediately client-side for
+  UX, once again server-side when the evidence record is created — because
+  the server-side pass is the one that ends up on the permanent record, and
+  it shouldn't have to trust whatever the client already showed the user.
+  That's a real, acknowledged cost trade-off, not an oversight.
+- The public endpoint's abuse controls (a honeypot field and an origin
+  check) were always known to be nuisance-level, not real protection —
+  that was true before AI existed and is documented as an open item. Adding
+  paid AI/transcription calls into that same unprotected path is a bigger
+  problem now than it was when the endpoint just wrote a database row, and
+  is called out explicitly as a next step rather than left implicit.
+
+WHAT'S DELIBERATELY NOT DONE YET
+
+No CAPTCHA/rate limiting in front of the public capture endpoint, no
+retention/deletion policy or scheduled purge for evidence and reporter PII,
+and no reporter email verification before customer-facing notifications.
+These are named directly in the repo's own security notes rather than
+glossed over — the goal was a credible, honestly-scoped backend foundation,
+not a claim that this is production-ready for a regulated team on day one.
